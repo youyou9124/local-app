@@ -1,0 +1,538 @@
+[
+  {
+    "id": "loss-tuning",
+    "title": "Cross-entropy / Loss Tuning",
+    "description": "Pick the right loss shape, targets, weights, and smoothing for classification work.",
+    "exercises": [
+      {
+        "id": "loss-softmax-before-ce",
+        "title": "Softmax Before CrossEntropyLoss",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "The model trains slowly and validation accuracy stalls. Find the loss API bug and fix the training step.",
+        "code": "import torch\nimport torch.nn as nn\n\nclass Net(nn.Module):\n    def __init__(self, n_features, n_classes):\n        super().__init__()\n        self.layers = nn.Sequential(\n            nn.Linear(n_features, 64),\n            nn.ReLU(),\n            nn.Linear(64, n_classes),\n            nn.Softmax(dim=1),\n        )\n\n    def forward(self, x):\n        return self.layers(x)\n\nmodel = Net(32, 5)\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3)\ncriterion = nn.CrossEntropyLoss()\n\nfor x_batch, y_batch in train_loader:\n    optimizer.zero_grad()\n    probs = model(x_batch)\n    loss = criterion(probs, y_batch)\n    loss.backward()\n    optimizer.step()",
+        "steps": [
+          "Identify whether CrossEntropyLoss expects probabilities or raw logits.",
+          "Trace the model output and find where probabilities are created.",
+          "Remove the Softmax from training logits and apply softmax only for reporting probabilities."
+        ],
+        "hints": [
+          "In PyTorch, one common classification loss already contains a log-softmax internally.",
+          "Passing probabilities into CrossEntropyLoss squashes gradients twice and can make learning brittle.",
+          "Return raw logits from forward(); use torch.softmax(logits, dim=1) only during metrics or inference display."
+        ],
+        "solution": "Remove nn.Softmax(dim=1) from the model. Rename probs to logits in the training loop and pass logits directly to nn.CrossEntropyLoss(). If calibrated probabilities are needed later, compute torch.softmax(logits, dim=1) outside the loss path.",
+        "fixedCode": "class Net(nn.Module):\n    def __init__(self, n_features, n_classes):\n        super().__init__()\n        self.layers = nn.Sequential(\n            nn.Linear(n_features, 64),\n            nn.ReLU(),\n            nn.Linear(64, n_classes),\n        )\n\n    def forward(self, x):\n        return self.layers(x)\n\ncriterion = nn.CrossEntropyLoss()\n\nfor x_batch, y_batch in train_loader:\n    optimizer.zero_grad()\n    logits = model(x_batch)\n    loss = criterion(logits, y_batch)\n    loss.backward()\n    optimizer.step()"
+      },
+      {
+        "id": "loss-class-weights-too-strict",
+        "title": "Class Weights Too Strict",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Minority recall jumps but precision collapses. The weighting scheme overcorrects the class imbalance.",
+        "code": "import numpy as np\nimport torch\nimport torch.nn as nn\n\ncounts = np.bincount(train_labels)\nweights = 1.0 / counts\nweights = weights / weights.min()\n\ncriterion = nn.CrossEntropyLoss(\n    weight=torch.tensor(weights, dtype=torch.float32).to(device)\n)\n\nfor epoch in range(20):\n    for xb, yb in train_loader:\n        optimizer.zero_grad()\n        logits = model(xb.to(device))\n        loss = criterion(logits, yb.to(device))\n        loss.backward()\n        optimizer.step()\n\n# class 3 has only 18 examples, so its weight is 61.4",
+        "steps": [
+          "Inspect how the class weights are derived from raw counts.",
+          "Reason about what a 50x or 60x multiplier does to gradients and false positives.",
+          "Use a smoother weighting rule, clipping, or validation-selected weights."
+        ],
+        "hints": [
+          "Inverse frequency is often too aggressive for very rare classes.",
+          "Try sqrt inverse frequency, effective-number weighting, or a clipped maximum.",
+          "Keep weights on the same device and tune the cap against macro F1 or PR-AUC, not only recall."
+        ],
+        "solution": "Replace raw inverse-frequency weights with a moderated scheme, such as sqrt(total / (num_classes * counts)), then clip extreme weights. Evaluate the precision-recall trade-off on validation data before locking the weights.",
+        "fixedCode": "counts = np.bincount(train_labels)\nnum_classes = len(counts)\nraw = np.sqrt(counts.sum() / (num_classes * counts))\nweights = np.clip(raw, 0.5, 5.0)\n\ncriterion = nn.CrossEntropyLoss(\n    weight=torch.tensor(weights, dtype=torch.float32, device=device)\n)"
+      },
+      {
+        "id": "loss-label-smoothing",
+        "title": "Missing Label Smoothing",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "The classifier becomes overconfident on noisy labels. Add a loss-level regularizer without changing the dataset.",
+        "code": "import torch.nn as nn\n\nmodel = TextClassifier(vocab_size, hidden=256, classes=8).to(device)\ncriterion = nn.CrossEntropyLoss()\noptimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)\n\nfor batch in train_loader:\n    input_ids = batch['input_ids'].to(device)\n    labels = batch['label'].to(device)\n\n    optimizer.zero_grad()\n    logits = model(input_ids)\n    loss = criterion(logits, labels)\n    loss.backward()\n    optimizer.step()\n\n# validation accuracy is ok, but calibration is poor",
+        "steps": [
+          "Identify why hard one-hot targets can be brittle under label noise.",
+          "Find the CrossEntropyLoss argument that softens target confidence.",
+          "Choose a modest smoothing value and monitor calibration plus accuracy."
+        ],
+        "hints": [
+          "Overconfident logits can be a symptom of noisy labels and hard targets.",
+          "PyTorch CrossEntropyLoss supports label_smoothing.",
+          "Start around 0.05 to 0.1 and validate; too much smoothing can blur real class boundaries."
+        ],
+        "solution": "Set label_smoothing on CrossEntropyLoss, for example nn.CrossEntropyLoss(label_smoothing=0.05). This distributes a small amount of probability mass away from the true class and discourages brittle overconfidence.",
+        "fixedCode": "criterion = nn.CrossEntropyLoss(label_smoothing=0.05)\n\nfor batch in train_loader:\n    input_ids = batch['input_ids'].to(device)\n    labels = batch['label'].to(device)\n    optimizer.zero_grad()\n    logits = model(input_ids)\n    loss = criterion(logits, labels)\n    loss.backward()\n    optimizer.step()"
+      }
+    ]
+  },
+  {
+    "id": "data-leakage",
+    "title": "Data Leakage in Preprocessing",
+    "description": "Keep validation and test information out of fitted preprocessing state.",
+    "exercises": [
+      {
+        "id": "leakage-scaler-before-split",
+        "title": "Scaler Fit Before Split",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Validation metrics look excellent offline and disappoint in production. Find the preprocessing leak.",
+        "code": "from sklearn.model_selection import train_test_split\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.metrics import roc_auc_score\n\nX = df[feature_cols]\ny = df['churned']\n\nscaler = StandardScaler()\nX_scaled = scaler.fit_transform(X)\n\nX_train, X_valid, y_train, y_valid = train_test_split(\n    X_scaled, y, test_size=0.2, random_state=42, stratify=y\n)\n\nclf = LogisticRegression(max_iter=1000)\nclf.fit(X_train, y_train)\n\npred = clf.predict_proba(X_valid)[:, 1]\nprint(roc_auc_score(y_valid, pred))",
+        "steps": [
+          "Locate every call that learns statistics from data.",
+          "Move fit operations after the split and apply transform to validation only.",
+          "Prefer a Pipeline so the same discipline is used in cross-validation and production."
+        ],
+        "hints": [
+          "Mean and variance are learned from the full dataset here.",
+          "Validation rows should not influence scaler.fit.",
+          "A sklearn Pipeline prevents this bug from reappearing during model selection."
+        ],
+        "solution": "Split first. Fit StandardScaler on X_train only, transform X_train and X_valid separately, or wrap StandardScaler and LogisticRegression in a Pipeline.",
+        "fixedCode": "from sklearn.pipeline import Pipeline\n\nX_train, X_valid, y_train, y_valid = train_test_split(\n    X, y, test_size=0.2, random_state=42, stratify=y\n)\n\npipe = Pipeline([\n    ('scaler', StandardScaler()),\n    ('clf', LogisticRegression(max_iter=1000)),\n])\npipe.fit(X_train, y_train)\npred = pipe.predict_proba(X_valid)[:, 1]"
+      },
+      {
+        "id": "leakage-target-encoding",
+        "title": "Target Encoding Leakage",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A high-cardinality categorical feature gives suspiciously strong validation performance.",
+        "code": "import pandas as pd\nfrom sklearn.model_selection import KFold\n\nX = df.copy()\ny = X.pop('converted')\n\nmerchant_rate = df.groupby('merchant_id')['converted'].mean()\nX['merchant_rate'] = X['merchant_id'].map(merchant_rate)\nX = X.drop(columns=['merchant_id'])\n\nscores = []\nfor train_idx, valid_idx in KFold(n_splits=5, shuffle=True, random_state=1).split(X):\n    model.fit(X.iloc[train_idx], y.iloc[train_idx])\n    scores.append(model.score(X.iloc[valid_idx], y.iloc[valid_idx]))\n\nprint(sum(scores) / len(scores))",
+        "steps": [
+          "Notice that the encoded feature uses labels from all rows.",
+          "Create out-of-fold encodings for training rows.",
+          "Fit final category statistics only on the training fold and apply to validation."
+        ],
+        "hints": [
+          "The groupby includes validation targets.",
+          "Target encoding must be fold-aware.",
+          "Use smoothing and a global fallback for unseen categories."
+        ],
+        "solution": "Build target encodings inside each training fold. Validation rows should receive mappings computed only from that fold's training rows. For the full training matrix, use out-of-fold encodings rather than a single all-data groupby.",
+        "fixedCode": "kf = KFold(n_splits=5, shuffle=True, random_state=1)\nscores = []\nfor train_idx, valid_idx in kf.split(df):\n    train = df.iloc[train_idx].copy()\n    valid = df.iloc[valid_idx].copy()\n    global_rate = train['converted'].mean()\n    rates = train.groupby('merchant_id')['converted'].mean()\n    X_train = train.assign(merchant_rate=train['merchant_id'].map(rates).fillna(global_rate))\n    X_valid = valid.assign(merchant_rate=valid['merchant_id'].map(rates).fillna(global_rate))\n    y_train = X_train.pop('converted')\n    y_valid = X_valid.pop('converted')\n    X_train = X_train.drop(columns=['merchant_id'])\n    X_valid = X_valid.drop(columns=['merchant_id'])\n    model.fit(X_train, y_train)\n    scores.append(model.score(X_valid, y_valid))"
+      },
+      {
+        "id": "leakage-imputer-full-data",
+        "title": "Imputer Learns From Holdout",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A median imputer is fit before the holdout split, letting validation distribution details leak into training.",
+        "code": "from sklearn.impute import SimpleImputer\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.model_selection import train_test_split\n\nX = customers[features]\ny = customers['will_upgrade']\n\nimputer = SimpleImputer(strategy='median')\nX = imputer.fit_transform(X)\n\nX_train, X_test, y_train, y_test = train_test_split(\n    X, y, test_size=0.25, random_state=7\n)\n\nmodel = RandomForestClassifier(random_state=7)\nmodel.fit(X_train, y_train)\nprint(model.score(X_test, y_test))",
+        "steps": [
+          "Classify the imputer as a fitted preprocessing step.",
+          "Move the split before fitting the imputer.",
+          "Use a Pipeline so the fitted imputer can be saved with the model."
+        ],
+        "hints": [
+          "Median values are learned parameters.",
+          "Holdout rows are supposed to simulate unknown future data.",
+          "Pipeline([('imputer', ...), ('model', ...)]) keeps preprocessing and model together."
+        ],
+        "solution": "Split raw features first and fit the imputer only on training rows. A Pipeline is the cleanest fix because it serializes preprocessing and estimator behavior together.",
+        "fixedCode": "from sklearn.pipeline import Pipeline\n\nX_train, X_test, y_train, y_test = train_test_split(\n    X, y, test_size=0.25, random_state=7\n)\n\npipe = Pipeline([\n    ('imputer', SimpleImputer(strategy='median')),\n    ('model', RandomForestClassifier(random_state=7)),\n])\npipe.fit(X_train, y_train)\nprint(pipe.score(X_test, y_test))"
+      }
+    ]
+  },
+  {
+    "id": "validation-strategy",
+    "title": "Validation Strategy",
+    "description": "Choose splits that match time, groups, and deployment reality.",
+    "exercises": [
+      {
+        "id": "validation-timeseries-shuffle",
+        "title": "Shuffled K-Fold on Time Series",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Forecasting validation is too optimistic because future rows appear in training folds.",
+        "code": "from sklearn.model_selection import StratifiedKFold, cross_val_score\nfrom sklearn.ensemble import HistGradientBoostingClassifier\n\nX = events.sort_values('timestamp')[features]\ny = events.sort_values('timestamp')['will_buy']\n\ncv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)\nmodel = HistGradientBoostingClassifier(random_state=42)\n\nscores = cross_val_score(model, X, y, cv=cv, scoring='roc_auc')\nprint(scores.mean())",
+        "steps": [
+          "Compare the split method to the deployment scenario.",
+          "Preserve chronological order so validation is later than training.",
+          "Swap in TimeSeriesSplit or a custom blocked split."
+        ],
+        "hints": [
+          "Shuffle=True is a red flag for forecasting or event streams.",
+          "Stratification can conflict with temporal integrity.",
+          "TimeSeriesSplit expands training history and validates on later windows."
+        ],
+        "solution": "Use TimeSeriesSplit on timestamp-sorted rows. If production trains on past data to predict future data, validation must do the same even when class balance varies by fold.",
+        "fixedCode": "from sklearn.model_selection import TimeSeriesSplit, cross_val_score\n\nordered = events.sort_values('timestamp')\nX = ordered[features]\ny = ordered['will_buy']\ncv = TimeSeriesSplit(n_splits=5)\nscores = cross_val_score(model, X, y, cv=cv, scoring='roc_auc')"
+      },
+      {
+        "id": "validation-group-leakage",
+        "title": "User Leakage Across Folds",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "The same user can appear in training and validation, making the model memorize user-specific behavior.",
+        "code": "from sklearn.model_selection import StratifiedKFold\nfrom sklearn.metrics import f1_score\n\nX = clicks[features]\ny = clicks['clicked']\nusers = clicks['user_id']\n\ncv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)\nfold_scores = []\nfor train_idx, valid_idx in cv.split(X, y):\n    model.fit(X.iloc[train_idx], y.iloc[train_idx])\n    pred = model.predict(X.iloc[valid_idx])\n    fold_scores.append(f1_score(y.iloc[valid_idx], pred))\n\nprint(fold_scores)",
+        "steps": [
+          "Identify the entity that should not cross fold boundaries.",
+          "Use a group-aware splitter with user_id as the group.",
+          "Pass groups to the split call and evaluate on unseen users."
+        ],
+        "hints": [
+          "Rows are not independent when they share user_id.",
+          "GroupKFold prevents the same group from appearing in both train and validation.",
+          "If label balance matters too, consider StratifiedGroupKFold when available."
+        ],
+        "solution": "Use GroupKFold or StratifiedGroupKFold and pass users as groups. This estimates performance on new users instead of repeated observations from known users.",
+        "fixedCode": "from sklearn.model_selection import GroupKFold\n\ncv = GroupKFold(n_splits=5)\nfold_scores = []\nfor train_idx, valid_idx in cv.split(X, y, groups=users):\n    model.fit(X.iloc[train_idx], y.iloc[train_idx])\n    pred = model.predict(X.iloc[valid_idx])\n    fold_scores.append(f1_score(y.iloc[valid_idx], pred))"
+      },
+      {
+        "id": "validation-panel-data",
+        "title": "Panel Data Split Mismatch",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A customer-month model uses random stratified folds, mixing future months and customer history across validation.",
+        "code": "from sklearn.model_selection import train_test_split\n\npanel = customer_months.sort_values(['customer_id', 'month'])\nX = panel[features]\ny = panel['renewed']\n\nX_train, X_valid, y_train, y_valid = train_test_split(\n    X, y, test_size=0.2, stratify=y, random_state=5\n)\n\nmodel.fit(X_train, y_train)\nprint(model.score(X_valid, y_valid))",
+        "steps": [
+          "Define what the model will face in production: future months, new customers, or both.",
+          "Choose a time-based cutoff or group split that matches that question.",
+          "Avoid row-random splitting for panel observations."
+        ],
+        "hints": [
+          "Panel rows share both entity and time dependencies.",
+          "A cutoff month is often clearer than random rows.",
+          "If testing new customers, group by customer_id; if testing future months, split by month."
+        ],
+        "solution": "Use a chronological cutoff for future-month validation, or GroupKFold for new-customer validation. The key is to encode the production question directly into the split.",
+        "fixedCode": "cutoff = panel['month'].quantile(0.8)\ntrain = panel[panel['month'] <= cutoff]\nvalid = panel[panel['month'] > cutoff]\n\nX_train, y_train = train[features], train['renewed']\nX_valid, y_valid = valid[features], valid['renewed']\nmodel.fit(X_train, y_train)\nprint(model.score(X_valid, y_valid))"
+      }
+    ]
+  },
+  {
+    "id": "vectorization-performance",
+    "title": "Vectorization & Performance",
+    "description": "Replace slow Python-row logic with NumPy, pandas, or batched tensor operations.",
+    "exercises": [
+      {
+        "id": "vectorization-python-distance-loop",
+        "title": "Python Loop Distance Calculation",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Feature generation takes minutes because it loops row by row over coordinate arrays.",
+        "code": "import numpy as np\n\ndef add_distance(df):\n    distances = []\n    for _, row in df.iterrows():\n        dx = row['x2'] - row['x1']\n        dy = row['y2'] - row['y1']\n        distances.append(np.sqrt(dx * dx + dy * dy))\n    df = df.copy()\n    df['distance'] = distances\n    return df\n\nfeatures = add_distance(raw_features)",
+        "steps": [
+          "Find the row-wise Python loop and repeated scalar operations.",
+          "Express the calculation over whole columns.",
+          "Avoid mutating the caller's dataframe unexpectedly."
+        ],
+        "hints": [
+          "iterrows is usually slow for numeric feature creation.",
+          "NumPy ufuncs operate over entire arrays in compiled code.",
+          "np.hypot(dx, dy) is a stable vectorized Euclidean distance helper."
+        ],
+        "solution": "Compute dx and dy as column vectors and use np.hypot. This removes Python-row overhead and keeps the calculation readable.",
+        "fixedCode": "def add_distance(df):\n    out = df.copy()\n    dx = out['x2'].to_numpy() - out['x1'].to_numpy()\n    dy = out['y2'].to_numpy() - out['y1'].to_numpy()\n    out['distance'] = np.hypot(dx, dy)\n    return out"
+      },
+      {
+        "id": "vectorization-pandas-apply",
+        "title": "Pandas Apply for Simple Rule",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A simple feature is implemented with axis=1 apply and slows every training run.",
+        "code": "def risk_bucket(row):\n    if row['days_late'] > 30 and row['balance'] > 1000:\n        return 'high'\n    if row['days_late'] > 7:\n        return 'medium'\n    return 'low'\n\ntrain_df['risk_bucket'] = train_df.apply(risk_bucket, axis=1)\nvalid_df['risk_bucket'] = valid_df.apply(risk_bucket, axis=1)",
+        "steps": [
+          "Recognize that the rule is columnar and deterministic.",
+          "Build boolean masks for each condition.",
+          "Use np.select or pandas where instead of row apply."
+        ],
+        "hints": [
+          "axis=1 apply still calls Python for each row.",
+          "The conditions can be evaluated for all rows at once.",
+          "np.select accepts ordered conditions and choices."
+        ],
+        "solution": "Use vectorized masks with np.select. This is faster, easier to test, and applies the same rule consistently to train and validation frames.",
+        "fixedCode": "def add_risk_bucket(frame):\n    out = frame.copy()\n    conditions = [\n        (out['days_late'] > 30) & (out['balance'] > 1000),\n        out['days_late'] > 7,\n    ]\n    out['risk_bucket'] = np.select(conditions, ['high', 'medium'], default='low')\n    return out\n\ntrain_df = add_risk_bucket(train_df)\nvalid_df = add_risk_bucket(valid_df)"
+      },
+      {
+        "id": "vectorization-single-row-inference",
+        "title": "Single-row Tensor Inference",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Inference loops over one sample at a time instead of batching tensor work.",
+        "code": "predictions = []\nfor item in records:\n    x = torch.tensor(item['features'], dtype=torch.float32).to(device)\n    logits = model(x.unsqueeze(0))\n    prob = torch.softmax(logits, dim=1)[0, 1].item()\n    predictions.append(prob)\n\nreturn predictions",
+        "steps": [
+          "Identify per-record tensor creation and device transfer.",
+          "Batch records into one tensor or chunks.",
+          "Run inference under no_grad and move results back once."
+        ],
+        "hints": [
+          "Many tiny GPU calls can be slower than one medium batch.",
+          "Stack features before moving to the device.",
+          "Use torch.no_grad() or torch.inference_mode() for inference."
+        ],
+        "solution": "Batch feature arrays, move them to the device once, and run the model in inference mode. Chunking can be added if the full batch is too large.",
+        "fixedCode": "features = torch.tensor(\n    [item['features'] for item in records], dtype=torch.float32, device=device\n)\nmodel.eval()\nwith torch.inference_mode():\n    logits = model(features)\n    predictions = torch.softmax(logits, dim=1)[:, 1].cpu().tolist()\nreturn predictions"
+      }
+    ]
+  },
+  {
+    "id": "train-inference-mode",
+    "title": "Train / Inference Mode Bugs",
+    "description": "Use eval mode and no-grad contexts when evaluating or serving models.",
+    "exercises": [
+      {
+        "id": "mode-missing-eval",
+        "title": "Missing model.eval()",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Validation metrics fluctuate because dropout and batch norm stay in training mode.",
+        "code": "def validate(model, valid_loader):\n    losses = []\n    for xb, yb in valid_loader:\n        logits = model(xb.to(device))\n        loss = criterion(logits, yb.to(device))\n        losses.append(loss.item())\n    return sum(losses) / len(losses)\n\nfor epoch in range(10):\n    model.train()\n    train_one_epoch(model, train_loader)\n    print(validate(model, valid_loader))",
+        "steps": [
+          "Find whether the validation function switches module behavior.",
+          "Set eval mode before validation.",
+          "Restore train mode before the next optimization epoch."
+        ],
+        "hints": [
+          "Dropout and batch normalization behave differently during evaluation.",
+          "model.eval() changes layer behavior; it does not disable gradients by itself.",
+          "Call model.train() before training resumes."
+        ],
+        "solution": "Call model.eval() inside validate and model.train() inside training. This makes validation deterministic for dropout and uses running batch norm statistics.",
+        "fixedCode": "def validate(model, valid_loader):\n    model.eval()\n    losses = []\n    with torch.no_grad():\n        for xb, yb in valid_loader:\n            logits = model(xb.to(device))\n            loss = criterion(logits, yb.to(device))\n            losses.append(loss.item())\n    return sum(losses) / len(losses)"
+      },
+      {
+        "id": "mode-missing-no-grad",
+        "title": "Missing torch.no_grad()",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Validation runs out of memory because autograd graphs are built for every batch.",
+        "code": "model.eval()\nall_probs = []\nfor xb, _ in valid_loader:\n    logits = model(xb.to(device))\n    probs = torch.softmax(logits, dim=1)\n    all_probs.append(probs.cpu())\n\nvalid_probs = torch.cat(all_probs)",
+        "steps": [
+          "Separate layer mode from gradient tracking.",
+          "Wrap validation forward passes with no_grad or inference_mode.",
+          "Detach or move only the final tensors needed for metrics."
+        ],
+        "hints": [
+          "model.eval() does not turn off autograd.",
+          "Autograd graph retention can grow memory usage batch after batch.",
+          "torch.inference_mode() is even stricter and often faster for pure inference."
+        ],
+        "solution": "Keep model.eval(), then wrap the loop in torch.no_grad() or torch.inference_mode(). This prevents graph construction and reduces memory use.",
+        "fixedCode": "model.eval()\nall_probs = []\nwith torch.inference_mode():\n    for xb, _ in valid_loader:\n        logits = model(xb.to(device))\n        probs = torch.softmax(logits, dim=1)\n        all_probs.append(probs.cpu())\nvalid_probs = torch.cat(all_probs)"
+      },
+      {
+        "id": "mode-eval-left-on",
+        "title": "Eval Mode Left On",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "After a mid-epoch validation callback, dropout never turns back on for training.",
+        "code": "for step, batch in enumerate(train_loader):\n    if step % 200 == 0:\n        model.eval()\n        run_validation(model)\n\n    xb, yb = batch\n    optimizer.zero_grad()\n    logits = model(xb.to(device))\n    loss = criterion(logits, yb.to(device))\n    loss.backward()\n    optimizer.step()",
+        "steps": [
+          "Track model mode before and after validation.",
+          "Ensure training mode is restored before the optimization step.",
+          "Keep validation behavior inside a helper that owns mode switching."
+        ],
+        "hints": [
+          "eval mode persists until train is called.",
+          "Dropout disabled during training can change generalization.",
+          "A validate() helper can set eval, use no_grad, then return control cleanly."
+        ],
+        "solution": "Call model.train() after validation and before training forward passes. Better yet, centralize validation in a function that switches to eval internally and make the training loop explicitly set train mode.",
+        "fixedCode": "for step, batch in enumerate(train_loader):\n    if step % 200 == 0:\n        validate(model, valid_loader)\n        model.train()\n\n    xb, yb = batch\n    optimizer.zero_grad()\n    logits = model(xb.to(device))\n    loss = criterion(logits, yb.to(device))\n    loss.backward()\n    optimizer.step()"
+      }
+    ]
+  },
+  {
+    "id": "imbalance-metrics",
+    "title": "Class Imbalance & Metric Choice",
+    "description": "Match metrics and thresholds to rare-event and multi-class goals.",
+    "exercises": [
+      {
+        "id": "metric-accuracy-imbalance",
+        "title": "Accuracy Hides Rare-class Failure",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A fraud model reports 99.2% accuracy while missing most fraud cases.",
+        "code": "from sklearn.metrics import accuracy_score\n\nprobs = model.predict_proba(X_valid)[:, 1]\npred = (probs >= 0.5).astype(int)\n\nprint('accuracy', accuracy_score(y_valid, pred))\n\nif accuracy_score(y_valid, pred) > 0.99:\n    register_model(model)",
+        "steps": [
+          "Compare class prevalence to the reported accuracy.",
+          "Choose metrics that reflect minority detection quality.",
+          "Tune the decision threshold on validation data."
+        ],
+        "hints": [
+          "A model can be highly accurate by predicting the majority class.",
+          "For rare positive classes, inspect recall, precision, F1, PR-AUC, and confusion matrix.",
+          "The default 0.5 threshold is rarely optimal for imbalanced costs."
+        ],
+        "solution": "Replace accuracy gating with minority-aware metrics such as recall at a precision floor, F1, ROC-AUC plus PR-AUC, or cost-weighted utility. Tune the threshold on validation data.",
+        "fixedCode": "from sklearn.metrics import precision_recall_curve, average_precision_score, f1_score\n\nprobs = model.predict_proba(X_valid)[:, 1]\nprecision, recall, thresholds = precision_recall_curve(y_valid, probs)\nf1 = 2 * precision * recall / (precision + recall + 1e-12)\nbest_threshold = thresholds[f1[:-1].argmax()]\npred = (probs >= best_threshold).astype(int)\n\nprint('pr_auc', average_precision_score(y_valid, probs))\nprint('f1', f1_score(y_valid, pred))"
+      },
+      {
+        "id": "metric-macro-vs-micro",
+        "title": "Micro F1 Masks Small Classes",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A multi-class support classifier looks strong overall but fails on low-volume categories.",
+        "code": "from sklearn.metrics import f1_score, classification_report\n\npred = clf.predict(X_valid)\nscore = f1_score(y_valid, pred, average='micro')\nprint('f1', score)\nprint(classification_report(y_valid, pred))",
+        "steps": [
+          "Explain how micro averaging weights each individual example.",
+          "Check whether the business needs each class to perform well.",
+          "Add macro or weighted F1 and inspect per-class support."
+        ],
+        "hints": [
+          "Micro F1 behaves like accuracy in single-label multi-class classification.",
+          "Macro F1 gives each class equal weight.",
+          "Weighted F1 accounts for support, but can still hide tiny class failures."
+        ],
+        "solution": "Report macro F1 for equal class importance, weighted F1 for prevalence-aware summaries, and per-class precision/recall. Do not rely only on micro F1 when low-volume classes matter.",
+        "fixedCode": "pred = clf.predict(X_valid)\nprint('macro_f1', f1_score(y_valid, pred, average='macro'))\nprint('weighted_f1', f1_score(y_valid, pred, average='weighted'))\nprint(classification_report(y_valid, pred, zero_division=0))"
+      },
+      {
+        "id": "metric-threshold-costs",
+        "title": "Wrong Threshold for Business Costs",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "The model uses a 0.5 threshold even though false negatives are much more expensive than false positives.",
+        "code": "probs = risk_model.predict_proba(X_valid)[:, 1]\npred = (probs > 0.5).astype(int)\n\nmissed = ((pred == 0) & (y_valid == 1)).sum()\nalerts = pred.sum()\nprint({'missed': missed, 'alerts': alerts})",
+        "steps": [
+          "Translate false positive and false negative costs into a validation objective.",
+          "Sweep thresholds and compute the objective for each threshold.",
+          "Pick the threshold that optimizes the target trade-off."
+        ],
+        "hints": [
+          "The classification threshold is a policy decision, not a model constant.",
+          "Use validation probabilities to simulate alert volume and misses.",
+          "You can optimize expected cost, recall at precision, or precision at recall."
+        ],
+        "solution": "Sweep thresholds on validation data and choose one based on the business cost function or operational constraint. Persist the selected threshold with the model artifact.",
+        "fixedCode": "thresholds = np.linspace(0.05, 0.95, 181)\nfn_cost = 20\nfp_cost = 1\nbest = None\nfor t in thresholds:\n    pred = (probs >= t).astype(int)\n    fp = ((pred == 1) & (y_valid == 0)).sum()\n    fn = ((pred == 0) & (y_valid == 1)).sum()\n    cost = fp_cost * fp + fn_cost * fn\n    if best is None or cost < best['cost']:\n        best = {'threshold': t, 'cost': cost}\nprint(best)"
+      }
+    ]
+  },
+  {
+    "id": "optimizer-lr",
+    "title": "Optimizer & Learning-rate Issues",
+    "description": "Fix gradient lifecycle, unstable learning rates, and scheduler placement.",
+    "exercises": [
+      {
+        "id": "optimizer-missing-zero-grad",
+        "title": "Missing zero_grad",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Training becomes unstable because gradients accumulate across unrelated batches.",
+        "code": "optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)\n\nfor epoch in range(5):\n    model.train()\n    for xb, yb in train_loader:\n        logits = model(xb.to(device))\n        loss = criterion(logits, yb.to(device))\n        loss.backward()\n        optimizer.step()\n\n    print('done', epoch)",
+        "steps": [
+          "Recall what PyTorch does with parameter gradients after backward.",
+          "Insert gradient clearing once per optimization step.",
+          "Use set_to_none=True for a small memory/performance improvement."
+        ],
+        "hints": [
+          "PyTorch accumulates gradients by default.",
+          "Accumulation is useful only when intentional across micro-batches.",
+          "Call optimizer.zero_grad(set_to_none=True) before backward."
+        ],
+        "solution": "Clear gradients for each batch before computing the new backward pass. Without this, every step includes stale gradients from previous batches.",
+        "fixedCode": "for epoch in range(5):\n    model.train()\n    for xb, yb in train_loader:\n        optimizer.zero_grad(set_to_none=True)\n        logits = model(xb.to(device))\n        loss = criterion(logits, yb.to(device))\n        loss.backward()\n        optimizer.step()"
+      },
+      {
+        "id": "optimizer-lr-too-high",
+        "title": "Learning Rate Too High",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Loss explodes after a few batches. Stabilize the optimization loop.",
+        "code": "optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)\n\nfor xb, yb in train_loader:\n    optimizer.zero_grad()\n    logits = model(xb.to(device))\n    loss = criterion(logits, yb.to(device))\n    loss.backward()\n    optimizer.step()\n\n# loss: 0.8, 1.4, 6.9, nan",
+        "steps": [
+          "Inspect the optimizer and learning rate relative to model type.",
+          "Lower the learning rate and consider warmup or gradient clipping.",
+          "Monitor loss and gradient norms after the change."
+        ],
+        "hints": [
+          "0.1 is usually too high for AdamW on neural networks.",
+          "Exploding loss or NaNs can indicate oversized updates.",
+          "Try 1e-3, 3e-4, or an LR finder; clipping can protect against spikes."
+        ],
+        "solution": "Reduce AdamW's learning rate to a typical range, add gradient clipping if gradients spike, and optionally use a scheduler with warmup.",
+        "fixedCode": "optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)\n\nfor xb, yb in train_loader:\n    optimizer.zero_grad(set_to_none=True)\n    logits = model(xb.to(device))\n    loss = criterion(logits, yb.to(device))\n    loss.backward()\n    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)\n    optimizer.step()"
+      },
+      {
+        "id": "optimizer-scheduler-order",
+        "title": "Scheduler Stepped at Wrong Time",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "The learning-rate schedule advances per batch even though it was configured per epoch.",
+        "code": "optimizer = torch.optim.SGD(model.parameters(), lr=0.1)\nscheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)\n\nfor epoch in range(20):\n    for xb, yb in train_loader:\n        optimizer.zero_grad()\n        loss = criterion(model(xb.to(device)), yb.to(device))\n        loss.backward()\n        optimizer.step()\n        scheduler.step()\n\n    print(scheduler.get_last_lr())",
+        "steps": [
+          "Check whether the scheduler is designed for batch or epoch stepping.",
+          "Move scheduler.step() to the appropriate loop level.",
+          "Log learning rates to verify decay timing."
+        ],
+        "hints": [
+          "StepLR with step_size=5 usually means five epochs here.",
+          "Stepping inside the batch loop compresses the schedule drastically.",
+          "Schedulers like OneCycleLR are batch-level; StepLR is commonly epoch-level."
+        ],
+        "solution": "Call StepLR once per epoch after optimizer updates for that epoch. Keep batch-level stepping only for schedulers explicitly configured that way.",
+        "fixedCode": "for epoch in range(20):\n    for xb, yb in train_loader:\n        optimizer.zero_grad()\n        loss = criterion(model(xb.to(device)), yb.to(device))\n        loss.backward()\n        optimizer.step()\n    scheduler.step()\n    print(scheduler.get_last_lr())"
+      }
+    ]
+  },
+  {
+    "id": "regularization",
+    "title": "Overfitting / Regularization",
+    "description": "Add controlled regularization, stopping rules, and validation-aware training.",
+    "exercises": [
+      {
+        "id": "regularization-no-early-stopping",
+        "title": "No Early Stopping",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "Training loss keeps falling while validation loss worsens after epoch 9.",
+        "code": "best_model = None\nfor epoch in range(50):\n    train_loss = train_one_epoch(model, train_loader)\n    valid_loss = evaluate(model, valid_loader)\n    print(epoch, train_loss, valid_loss)\n\nsave_model(model, 'final.pt')",
+        "steps": [
+          "Identify the gap between training and validation loss.",
+          "Track the best validation checkpoint, not the final epoch.",
+          "Stop after patience is exhausted."
+        ],
+        "hints": [
+          "The final epoch is not necessarily the best generalizing model.",
+          "Patience avoids stopping on one noisy validation point.",
+          "Save a copy of the best state_dict when validation improves."
+        ],
+        "solution": "Use early stopping with a patience window and restore the best validation checkpoint. This prevents selecting an overfit final epoch.",
+        "fixedCode": "import copy\n\nbest_state = None\nbest_valid = float('inf')\npatience = 5\nbad_epochs = 0\nfor epoch in range(50):\n    train_loss = train_one_epoch(model, train_loader)\n    valid_loss = evaluate(model, valid_loader)\n    if valid_loss < best_valid:\n        best_valid = valid_loss\n        best_state = copy.deepcopy(model.state_dict())\n        bad_epochs = 0\n    else:\n        bad_epochs += 1\n        if bad_epochs >= patience:\n            break\nmodel.load_state_dict(best_state)\nsave_model(model, 'best.pt')"
+      },
+      {
+        "id": "regularization-no-weight-decay",
+        "title": "Missing Weight Decay",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "A high-capacity tabular neural net memorizes training rows and needs mild parameter regularization.",
+        "code": "model = MLP(input_dim=120, hidden=512, layers=4).to(device)\noptimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.0)\n\nfor epoch in range(30):\n    train_one_epoch(model, train_loader, optimizer)\n    print(evaluate(model, valid_loader))",
+        "steps": [
+          "Find optimizer-level regularization settings.",
+          "Add a modest weight decay and validate the effect.",
+          "Avoid applying decay blindly to all parameter types in larger models."
+        ],
+        "hints": [
+          "AdamW decouples weight decay from the adaptive gradient update.",
+          "Start with values like 1e-4 or 1e-2 depending on model/data scale.",
+          "For transformers, biases and normalization weights are often excluded from decay."
+        ],
+        "solution": "Set a nonzero AdamW weight_decay and tune it on validation metrics. For simple MLPs, a single value is fine; for larger architectures, use parameter groups.",
+        "fixedCode": "optimizer = torch.optim.AdamW(\n    model.parameters(), lr=1e-3, weight_decay=1e-4\n)"
+      },
+      {
+        "id": "regularization-dropout-missing",
+        "title": "No Dropout in Dense Classifier",
+        "targetMinutes": 30,
+        "limitMinutes": 60,
+        "problem": "The dense classifier overfits small data. Add dropout without damaging inference behavior.",
+        "code": "class MLP(nn.Module):\n    def __init__(self, n_features):\n        super().__init__()\n        self.net = nn.Sequential(\n            nn.Linear(n_features, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, 2),\n        )\n\n    def forward(self, x):\n        return self.net(x)",
+        "steps": [
+          "Locate high-capacity hidden layers.",
+          "Place dropout after activations in the hidden stack.",
+          "Remember dropout is active only in train mode."
+        ],
+        "hints": [
+          "Dropout randomly masks hidden activations during training.",
+          "A p value around 0.1 to 0.3 is a common starting range for MLPs.",
+          "Validation must use model.eval() so dropout is disabled."
+        ],
+        "solution": "Insert nn.Dropout after hidden activations and tune p on validation. Ensure the evaluation loop calls model.eval() so predictions are deterministic.",
+        "fixedCode": "self.net = nn.Sequential(\n    nn.Linear(n_features, 256),\n    nn.ReLU(),\n    nn.Dropout(p=0.2),\n    nn.Linear(256, 128),\n    nn.ReLU(),\n    nn.Dropout(p=0.2),\n    nn.Linear(128, 2),\n)"
+      }
+    ]
+  }
+]

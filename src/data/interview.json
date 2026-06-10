@@ -1,0 +1,113 @@
+[
+  {
+    "id": "communication",
+    "title": "How to Speak in an MLE Interview",
+    "sections": [
+      {
+        "heading": "Structure First",
+        "body": "Open with the shape of your answer: problem, constraints, approach, trade-offs, and validation. A concise map makes your reasoning easier to follow."
+      },
+      {
+        "heading": "Think Out Loud",
+        "body": "Narrate assumptions and checks as you go. Interviewers are often evaluating how you debug ambiguity, not only whether you remember a specific API."
+      },
+      {
+        "heading": "Use STAR Without Sounding Scripted",
+        "body": "For experience questions, frame the situation, task, action, and result. Keep the result measurable when possible: latency cut, F1 lift, cost reduction, fewer incidents, or faster iteration."
+      },
+      {
+        "heading": "Name Trade-offs",
+        "bullets": [
+          "Accuracy versus latency",
+          "Recall versus precision",
+          "Simple validation versus deployment-realistic validation",
+          "Model complexity versus maintainability",
+          "Offline metric gains versus production monitoring risk"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "experience",
+    "title": "What Experience to Highlight",
+    "sections": [
+      {
+        "heading": "Tell Optimization Stories",
+        "body": "Strong MLE stories often involve finding a bottleneck, proving the root cause, and making the system better without overcomplicating it."
+      },
+      {
+        "heading": "Frame Projects",
+        "bullets": [
+          "Problem: what user or business outcome mattered?",
+          "Approach: what model, data, and validation choices did you make?",
+          "Debugging: what broke, leaked, overfit, or slowed down?",
+          "Impact: what changed in metrics, reliability, cost, or iteration speed?"
+        ]
+      },
+      {
+        "heading": "Good Signals",
+        "body": "Mention metric choice, leakage prevention, class imbalance, model serving constraints, monitoring, retraining triggers, and how you validated that an improvement was real."
+      }
+    ]
+  },
+  {
+    "id": "themes",
+    "title": "Common MLE Interview Themes",
+    "sections": [
+      {
+        "heading": "Model Evaluation",
+        "bullets": [
+          "Explain why accuracy can fail under imbalance.",
+          "Choose macro, micro, or weighted metrics based on class importance.",
+          "Discuss threshold tuning as a product or risk decision."
+        ]
+      },
+      {
+        "heading": "Validation Pitfalls",
+        "bullets": [
+          "Fit preprocessing only on training data.",
+          "Use time-aware splits for forecasting or event streams.",
+          "Use group-aware splits when users, accounts, patients, or devices repeat."
+        ]
+      },
+      {
+        "heading": "Debugging Training",
+        "bullets": [
+          "Check loss API expectations, target shape, and dtype.",
+          "Verify optimizer.zero_grad, learning rate, gradient norms, and scheduler timing.",
+          "Separate train and eval mode behavior."
+        ]
+      },
+      {
+        "heading": "Performance Optimization",
+        "body": "Look for row-wise Python loops, repeated device transfers, non-batched inference, wasteful serialization, and unnecessary recomputation."
+      }
+    ]
+  },
+  {
+    "id": "checklist",
+    "title": "Checklist / Do's and Don'ts",
+    "sections": [
+      {
+        "heading": "Do",
+        "bullets": [
+          "Clarify the objective before optimizing.",
+          "State assumptions and expected failure modes.",
+          "Tie validation to production reality.",
+          "Use metrics that reflect the cost of errors.",
+          "Describe how you would monitor the model after launch."
+        ]
+      },
+      {
+        "heading": "Don't",
+        "bullets": [
+          "Optimize an offline metric without checking leakage.",
+          "Treat a 0.5 threshold as automatically correct.",
+          "Ignore class-level performance under imbalance.",
+          "Forget train/eval mode, no-grad inference, or gradient clearing.",
+          "Jump to a larger model before checking data and training bugs."
+        ]
+      }
+    ]
+  }
+]

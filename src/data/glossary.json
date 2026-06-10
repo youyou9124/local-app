@@ -1,0 +1,76 @@
+[
+  {
+    "category": "Metrics",
+    "terms": [
+      { "term": "TP / FP / FN", "definition": "True positives are correctly predicted positives. False positives are negative cases predicted as positive. False negatives are positive cases the model missed." },
+      { "term": "Precision", "definition": "Of the items predicted positive, the fraction that were truly positive. Useful when false positives are expensive." },
+      { "term": "Recall", "definition": "Of the truly positive items, the fraction the model found. Useful when misses are expensive." },
+      { "term": "F1", "definition": "The harmonic mean of precision and recall. It rewards a balance between finding positives and avoiding false alarms." },
+      { "term": "Macro F1", "definition": "F1 computed independently for each class, then averaged equally. Good when small classes matter." },
+      { "term": "Micro F1", "definition": "F1 computed from globally pooled decisions. In single-label multi-class tasks it often behaves like accuracy." },
+      { "term": "Weighted F1", "definition": "Per-class F1 averaged by class support. It reflects dataset prevalence but can hide poor small-class performance." },
+      { "term": "AUC-ROC", "definition": "The area under the true-positive-rate versus false-positive-rate curve across thresholds. Useful for ranking quality, less informative under extreme imbalance than PR-AUC." },
+      { "term": "Dice", "definition": "A segmentation overlap score equal to twice the intersection divided by total predicted plus true area." },
+      { "term": "IoU", "definition": "Intersection over Union: overlap divided by the union of predicted and true regions." },
+      { "term": "Perplexity", "definition": "A language-model metric derived from cross-entropy. Lower perplexity means the model assigns higher probability to the observed text." },
+      { "term": "Exact Match", "definition": "A strict metric requiring the predicted answer to match the reference exactly, often used in QA and extraction." }
+    ]
+  },
+  {
+    "category": "Loss & Training",
+    "terms": [
+      { "term": "Cross-entropy", "definition": "A classification loss that penalizes assigning low probability to the true class. In PyTorch, CrossEntropyLoss expects raw logits." },
+      { "term": "Class weighting", "definition": "Increasing loss contribution from underrepresented or more important classes. Weights should be tuned because extreme values can overcorrect." },
+      { "term": "Label smoothing", "definition": "A regularization technique that softens hard labels by assigning a small amount of probability mass to non-target classes." },
+      { "term": "Loss masking", "definition": "Ignoring selected positions or examples in a loss calculation, commonly used for padded tokens or unknown labels." },
+      { "term": "Overfitting", "definition": "When a model learns training-specific patterns that do not generalize to validation or production data." },
+      { "term": "Regularization", "definition": "Techniques that discourage brittle fits, such as weight decay, dropout, augmentation, label smoothing, and early stopping." }
+    ]
+  },
+  {
+    "category": "Validation & Leakage",
+    "terms": [
+      { "term": "Cross-validation", "definition": "Repeatedly training and validating on different data splits to estimate generalization more robustly than a single split." },
+      { "term": "StratifiedKFold", "definition": "A cross-validation splitter that preserves class proportions across folds. It is not appropriate when time or group boundaries matter more." },
+      { "term": "TimeSeriesSplit", "definition": "A splitter that respects chronological order by training on earlier rows and validating on later rows." },
+      { "term": "GroupKFold", "definition": "A splitter that keeps all rows from the same group in either training or validation, not both." },
+      { "term": "Data leakage", "definition": "Any path where training or model selection sees information that would not be available at prediction time." },
+      { "term": "Temporal leakage", "definition": "A leakage type where future information influences features, preprocessing, validation, or labels for earlier predictions." },
+      { "term": "Group leakage", "definition": "A leakage type where related entities, such as the same user or patient, appear in both training and validation." }
+    ]
+  },
+  {
+    "category": "Distribution Shift",
+    "terms": [
+      { "term": "Distribution shift", "definition": "A difference between the data distribution used for training and the distribution encountered in production." },
+      { "term": "Covariate shift", "definition": "A change in feature distribution while the relationship between features and labels is assumed mostly stable." },
+      { "term": "Concept drift", "definition": "A change in the relationship between features and labels, such as user behavior changing after a product update." }
+    ]
+  },
+  {
+    "category": "Time Series",
+    "terms": [
+      { "term": "Seasonality", "definition": "A repeating pattern tied to calendar or cycle structure, such as hourly, weekly, or yearly effects." },
+      { "term": "Lag", "definition": "A previous value used as a feature, such as sales from seven days ago." },
+      { "term": "Autocorrelation", "definition": "Correlation between a time series and shifted versions of itself." },
+      { "term": "Recursive forecasting", "definition": "Predicting one step ahead, then feeding that prediction back in to predict later steps." },
+      { "term": "Direct forecasting", "definition": "Training separate outputs or models for each forecast horizon instead of recursively feeding predictions back in." }
+    ]
+  },
+  {
+    "category": "Models & NLP",
+    "terms": [
+      { "term": "Token", "definition": "A unit of text processed by a model, such as a word piece, character span, or punctuation mark." },
+      { "term": "Next-token prediction", "definition": "The language-modeling objective of predicting the next token given previous context." },
+      { "term": "Fine-tuning", "definition": "Continuing training from a pretrained model on task-specific data or instructions." }
+    ]
+  },
+  {
+    "category": "Math Helpers",
+    "terms": [
+      { "term": "Floor", "definition": "The greatest integer less than or equal to a value." },
+      { "term": "Max", "definition": "The largest value among inputs, often used for clipping, thresholds, or reductions." },
+      { "term": "Monotonic relationship", "definition": "A relationship that moves in only one direction: as one value increases, the other never decreases, or vice versa." }
+    ]
+  }
+]
