@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "electron:dev": "tsc -p tsconfig.node.json && concurrently -k \"npm run dev\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.json && vite build && electron-builder",
     "build:renderer": "tsc -p tsconfig.node.json && tsc -p tsconfig.json && vite build",
     "preview": "vite preview --host 127.0.0.1"
