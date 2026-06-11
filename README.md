@@ -33,6 +33,14 @@ npm install
 npm run electron:dev
 ```
 
+If npm reports a certificate error on Windows, run the install with Node's system certificate store for that command only:
+
+```bash
+NODE_OPTIONS=--use-system-ca npm install
+```
+
+Do not save `NODE_OPTIONS=--use-system-ca` in `.npmrc`; Electron does not allow that flag while launching the desktop app.
+
 ## Build a Windows .exe
 
 ```bash
