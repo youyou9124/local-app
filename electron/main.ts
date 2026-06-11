@@ -13,7 +13,6 @@ function createWindow() {
     title: "MLE Optimizer Trainer",
     backgroundColor: "#1e1e1e",
     webPreferences: {
-      preload: join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -22,6 +21,10 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`Renderer failed to load ${validatedURL}: ${errorCode} ${errorDescription}`);
   });
 
   if (!app.isPackaged) {
